@@ -1,125 +1,120 @@
 const express = require("express");
 const http = require("http");
-const mineflayer = require('mineflayer')
-const pvp = require('mineflayer-pvp').plugin
-const { pathfinder, Movements, goals} = require('mineflayer-pathfinder')
-const armorManager = require('mineflayer-armor-manager')
-const mc = require('minecraft-protocol');
-const AutoAuth = require('mineflayer-auto-auth');
+const mineflayer = require("mineflayer");
+const pvp = require("mineflayer-pvp").plugin;
+const { pathfinder, Movements, goals } = require("mineflayer-pathfinder");
+const armorManager = require("mineflayer-armor-manager");
+const AutoAuth = require("mineflayer-auto-auth");
 const app = express();
-
 
 app.use(express.json());
 
 app.get("/", (_, res) => res.sendFile(__dirname + "/index.html"));
 app.listen(process.env.PORT);
 
+// Keep the bot active by pinging the server at regular intervals
 setInterval(() => {
   http.get(`http://${process.env.PROJECT_DOMAIN}.repl.co/`);
 }, 224000);
 
+// Create and configure the bot
+function createBot() {
+  const bot = mineflayer.createBot({
+    host: "aswinx.aternos.me",
+    port: 37154,
+    version: false, // Specify the version if needed, e.g., '1.16.5'
+    username: "SG_Bot",
+    plugins: [AutoAuth],
+    AutoAuth: "bot112022", // Auto-authentication password
+  });
 
-// U CAN ONLY EDIT THIS SECTION!!
-function createBot () {
-const bot = mineflayer.createBot({
-  host: 'aswinx.aternos.me', 
-  version: false, // U can replace with 1.16.5 for example, remember to use ', = '1.16.5'
-  username: 'SG_Bot', 
-  port: 37154, 
-  plugins: [AutoAuth],
-  AutoAuth: 'bot112022'
-})
-/// DONT TOUCH ANYTHING MORE!
-bot.loadPlugin(pvp)
-bot.loadPlugin(armorManager)
-bot.loadPlugin(pathfinder)
+  // Load plugins
+  bot.loadPlugin(pvp);
+  bot.loadPlugin(armorManager);
+  bot.loadPlugin(pathfinder);
 
+  // Equip items when collected
+  bot.on("playerCollect", (collector, itemDrop) => {
+    if (collector !== bot.entity) return;
 
-bot.on('playerCollect', (collector, itemDrop) => {
-  if (collector !== bot.entity) return
+    setTimeout(() => {
+      const sword = bot.inventory.items().find(item => item.name.includes("sword"));
+      if (sword) bot.equip(sword, "hand");
+    }, 150);
 
-  setTimeout(() => {
-    const sword = bot.inventory.items().find(item => item.name.includes('sword'))
-    if (sword) bot.equip(sword, 'hand')
-  }, 150)
-})
+    setTimeout(() => {
+      const shield = bot.inventory.items().find(item => item.name.includes("shield"));
+      if (shield) bot.equip(shield, "off-hand");
+    }, 250);
+  });
 
-bot.on('playerCollect', (collector, itemDrop) => {
-  if (collector !== bot.entity) return
+  let guardPos = null;
 
-  setTimeout(() => {
-    const shield = bot.inventory.items().find(item => item.name.includes('shield'))
-    if (shield) bot.equip(shield, 'off-hand')
-  }, 250)
-})
-
-let guardPos = null
-
-function guardArea (pos) {
-  guardPos = pos.clone()
-
-  if (!bot.pvp.target) {
-    moveToGuardPos()
+  // Guard area logic
+  function guardArea(pos) {
+    guardPos = pos.clone();
+    if (!bot.pvp.target) moveToGuardPos();
   }
-}
 
-function stopGuarding () {
-  guardPos = null
-  bot.pvp.stop()
-  bot.pathfinder.setGoal(null)
-}
-
-function moveToGuardPos () {
-  const mcData = require('minecraft-data')(bot.version)
-  bot.pathfinder.setMovements(new Movements(bot, mcData))
-  bot.pathfinder.setGoal(new goals.GoalBlock(guardPos.x, guardPos.y, guardPos.z))
-}
-
-bot.on('stoppedAttacking', () => {
-  if (guardPos) {
-    moveToGuardPos()
+  function stopGuarding() {
+    guardPos = null;
+    bot.pvp.stop();
+    bot.pathfinder.setGoal(null);
   }
-})
 
-bot.on('physicTick', () => {
-  if (bot.pvp.target) return
-  if (bot.pathfinder.isMoving()) return
-
-  const entity = bot.nearestEntity()
-  if (entity) bot.lookAt(entity.position.offset(0, entity.height, 0))
-})
-bot.on('physicTick', () => {
-  if (!guardPos) return
-  const filter = e => e.type === 'mob' && e.position.distanceTo(bot.entity.position) < 16 &&
-                      e.mobType !== 'Armor Stand' 
-  const entity = bot.nearestEntity(filter)
-  if (entity) {
-    bot.pvp.attack(entity)
+  function moveToGuardPos() {
+    const mcData = require("minecraft-data")(bot.version);
+    bot.pathfinder.setMovements(new Movements(bot, mcData));
+    bot.pathfinder.setGoal(new goals.GoalBlock(guardPos.x, guardPos.y, guardPos.z));
   }
-})
-bot.on('chat', (username, message) => {
-  if (message === 'guard') {
-    const player = bot.players[username]
 
-    if (!player) {
-    bot.chat('I will!')
-    guardArea(player.entity.position)
+  // Bot behavior during and after attacking
+  bot.on("stoppedAttacking", () => {
+    if (guardPos) moveToGuardPos();
+  });
+
+  bot.on("physicTick", () => {
+    if (bot.pvp.target || bot.pathfinder.isMoving()) return;
+
+    const entity = bot.nearestEntity();
+    if (entity) bot.lookAt(entity.position.offset(0, entity.height, 0));
+  });
+
+  bot.on("physicTick", () => {
+    if (!guardPos) return;
+
+    const filter = e =>
+      e.type === "mob" &&
+      e.position.distanceTo(bot.entity.position) < 16 &&
+      e.mobType !== "Armor Stand";
+    const entity = bot.nearestEntity(filter);
+
+    if (entity) bot.pvp.attack(entity);
+  });
+
+  // Chat commands for guarding and stopping
+  bot.on("chat", (username, message) => {
+    const player = bot.players[username]?.entity;
+
+    if (message === "guard" && player) {
+      bot.chat("I will guard this area!");
+      guardArea(player.position);
+    } else if (message === "stop") {
+      bot.chat("I will stop guarding!");
+      stopGuarding();
     }
+  });
 
-  }
-  if (message === 'stop') {
-    bot.chat('I will stop!')
-    stopGuarding()
-  }
-})
-
-bot.on('kicked', console.log)
-bot.on('error', console.log)
-bot.on('end', createBot)
+  // Handle bot events
+  bot.on("kicked", console.log);
+  bot.on("error", console.log);
+  bot.on("end", createBot);
 }
 
-createBot()
+// Initialize the bot
+createBot();
 
-//// Rembember to sucribe to my channels!
-/// www.youtube.com/c/JinMoriYT
-///www.youtube.com/channel/UC1SR0lQSDfdaSMhmUiaMitg
+// Keep the credit for the original creator
+// YouTube Channels:
+// www.youtube.com/c/JinMoriYT
+// www.youtube.com/channel/UC1SR0lQSDfdaSMhmUiaMitg
